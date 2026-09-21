@@ -2,86 +2,95 @@
 
 An AI agent that reads an important document and tells you the specific ways it can cost you money.
 
-**Team DNK** — Krish Shah, Nolan Stillwell, Diego Guatarasma
-CEN 4930 AI Agent Studio · Florida Gulf Coast University · Fall 2026
+**Team DNK** — Krish Shah, Nolan Stillwell, Diego Guatarasma  
+CEN 4930 AI Agent Studio · Florida Gulf Coast University · Fall 2026  
 Instructor: Dr. Vinod Kumar Ahuja
 
-**Status:** Milestone 1 complete (team charter + problem discovery). Prototype work starts at M2.
+**Status:** Milestone 2 architecture + vertical slice on branch `milestone-2`.
 
 ---
 
 ## The problem
 
-People sign leases, service contracts, insurance and loan paperwork without reading past the first few pages, and the clauses that cost money — early termination fees, auto-renewal notice windows, non-refundable deposits, late penalties, liability shifts — stay buried until the money is already gone.
+People sign leases, service contracts, insurance and loan paperwork without reading past the first few pages. Clauses that cost money stay buried until the money is already gone.
 
-Upload the PDF, get back a short ranked list of money-loss risks, each one quoting the exact sentence and where it appears. Not a summary of the contract. A list of the ways it can take your money.
+Upload the PDF. Get a short ranked list of money-loss risks, each quoting the exact sentence and page. Not a summary — a grounded risk list.
 
-## What works right now
+## What the agent can do right now
 
-Nothing runs yet. This repo currently holds the M1 report and the Week 3 lab scripts we used to pick the model stack. The first working agent lands in M2.
+- Accept a PDF upload in the Next.js UI (`apps/web`)
+- Parse the file through MCP tool `document_parse` (page-mapped text)
+- Extract candidate risks (NRP / Anthropic when configured; **mock extractor offline**)
+- **Drop any finding whose quote is not in the source text** (citation validator)
+- Return ranked grounded findings via `GET /api/scans/:id`
+- Run three automated test cases including a hallucination trap
 
-## What is intentionally not implemented
+## What is intentionally not implemented yet
 
-- Any legal advice. The agent quotes what the document says. It does not tell you whether a clause is enforceable.
-- Negotiation suggestions or redlining.
-- Anything not grounded in the uploaded document. Every flagged risk must cite clause text.
-- Multi-agent split (extractor → ranker). That is M3.
+- Legal advice or enforceability opinions
+- Negotiation / redlining
+- Multi-agent extractor → ranker (M3)
+- Supabase pgvector retrieval (M3); local `./data` store is the M2 default
+- Background worker fleet (sync path for demo-sized PDFs)
+
+## Architecture (teammate map)
+
+See **[docs/architecture.md](docs/architecture.md)** and **[docs/TEAM_OWNERSHIP.md](docs/TEAM_OWNERSHIP.md)**.
+
+```
+apps/web/                 Next.js UI + API (Diego lane)
+packages/shared/          Shared types / contracts (Nolan lane)
+packages/mcp-document/    MCP document_parse (Nolan lane)
+packages/agent/           Provider, persona, orchestrator, validator (Krish lane)
+supabase/migrations/      RLS schema for cloud path (Diego lane)
+tests/                    Graded M2 cases (Nolan lane)
+docs/                     Architecture + contributing
+```
+
+## Setup (no cloud required)
+
+```bash
+git clone https://github.com/krocks9903/FInePrint-Agent.git
+cd FInePrint-Agent
+git checkout milestone-2
+cp .env.example .env
+npm install
+npm test
+npm run dev
+```
+
+Open http://localhost:3000. Default `MODEL_PROVIDER=mock` needs no API keys.
+
+### NRP / Anthropic (live model)
+
+```
+MODEL_PROVIDER=nrp
+NRP_BASE_URL=...
+NRP_API_KEY=...
+```
+
+Ask GroupMe for endpoint values. Never commit `.env`.
+
+### Supabase (optional for M2)
+
+Apply `supabase/migrations/20260921_m2_init.sql`, set `STORAGE_BACKEND=supabase` and keys. Until then the orchestrator uses the local JSON store under `./data` (gitignored).
+
+## Known limitations
+
+1. **Sync path on Vercel** — large PDFs can hit serverless timeouts; M3 may move processing to a worker.
+2. **Mock provider** — keyword heuristics for offline/CI; switch to NRP for demos.
+3. **No legal advice** — quotes only; citation validation fails closed on invented fees.
+4. **Demo owner** — M2 uses `DEMO_OWNER_ID` instead of full Auth UI (migrations already define RLS).
 
 ## Stack
 
 | Layer | Choice |
 |---|---|
-| Model | `gpt-oss` on NRP (National Research Platform / Nautilus), OpenAI-compatible endpoint |
-| Fallback | Personal Anthropic Claude API key, switched by one env var |
-| Agent framework | OpenAI Agents SDK |
-| Front end | React |
-| Data | Supabase (Postgres + pgvector for clause chunks, M3) |
-| Editor | VS Code with GitHub Copilot Agent Mode |
-
-NRP is provided free by the school, which is why bulk experimentation runs there. The Claude key is for evaluation runs and demos only, and has a spend cap.
-
-## Setup
-
-```bash
-git clone https://github.com/<org>/fineprint-agent.git
-cd fineprint-agent
-python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-Create a `.env` in the repo root:
-
-```
-NRP_BASE_URL=<endpoint url>
-NRP_API_KEY=<your key>
-MODEL_PROVIDER=nrp              # nrp | anthropic
-```
-
-Never commit `.env`. Ask in GroupMe for the endpoint values.
-
-Run a lab script to confirm your setup works:
-
-```bash
-python labs/01_first_agent.py
-```
-
-You should see a five-item research plan plus per-span token usage printed to the console.
-
-## Known limitations
-
-1. **Tracing is local only.** The Agents SDK's default trace exporter expects a real OpenAI key, so we swapped in a console `TracingProcessor`. You get token counts, not a hosted trace UI. Evaluation logging in M3 is something we have to build.
-2. **Structured output must be strict-JSON-schema-safe.** `dict[int, str]` output types fail. Use a list of `TypedDict` rows, or pass `AgentOutputSchema(..., strict_json_schema=False)`.
-3. **Reasoning eats the output budget.** `gpt-oss` spends tokens thinking. With a low `max_tokens` the answer truncates silently. Set `Reasoning(effort="low")` and budget output tokens separately on long input.
-
-## Repo layout
-
-```
-docs/        M1 report (LaTeX source + PDF)
-labs/        Week 3 model choice lab scripts
-agent/       agent code (M2)
-tests/       test cases (M2)
-```
+| Model | NRP `gpt-oss` (OpenAI-compatible); Anthropic fallback; `mock` for tests |
+| Agent | `@fineprint/agent` orchestrator + citation validator |
+| MCP | `document_parse` in `@fineprint/mcp-document` |
+| Front end | Next.js App Router |
+| Data | Local store (M2 default) / Supabase Postgres + Storage |
 
 ## Milestones
 
@@ -93,6 +102,6 @@ tests/       test cases (M2)
 | M4 | Evaluated + user-tested agent | Nov 18, 2026 |
 | FP | Final pitch + live demo | Nov 23, 2026 |
 
-## Contributing (team)
+## Contributing
 
-Branch per milestone. Open a PR and get one other member to review before merging. Commit history is graded from M2 onward, so commit your own work rather than pasting it into someone else's branch.
+Branch per topic off `milestone-2`. One other member reviews before merge. Commit history is graded — see [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).

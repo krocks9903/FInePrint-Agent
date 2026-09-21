@@ -1,0 +1,24 @@
+{
+  "name": "fineprint-agent",
+  "private": true,
+  "version": "0.2.0",
+  "description": "FinePrint Agent — grounded money-loss stipulation scanner (CEN 4930 Team DNK)",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @fineprint/shared && npm run build -w @fineprint/mcp-document && npm run build -w @fineprint/agent && npm run build -w @fineprint/web",
+    "dev": "npm run build -w @fineprint/shared && npm run build -w @fineprint/mcp-document && npm run build -w @fineprint/agent && npm run dev -w @fineprint/web",
+    "test": "npm run build -w @fineprint/shared && npm run build -w @fineprint/mcp-document && npm run build -w @fineprint/agent && node --import tsx --test tests/**/*.test.ts",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "mcp:document": "npm run start -w @fineprint/mcp-document"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}
