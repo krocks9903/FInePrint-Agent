@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "fineprint-document": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["tsx", "packages/mcp-document/src/server.ts"]
+    }
+  }
+}

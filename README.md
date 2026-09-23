@@ -61,6 +61,35 @@ npm run dev
 
 Open http://localhost:3000. Default `MODEL_PROVIDER=mock` needs no API keys.
 
+### Claude as MCP host
+
+FinePrint exposes `document_parse` over stdio. Claude Code (and Claude Desktop) are the MCP **host**; this repo is the MCP **server**.
+
+**Claude Code** — project config is checked in as [`.mcp.json`](.mcp.json). From the repo root:
+
+```bash
+npm install
+claude
+```
+
+Approve `fineprint-document` when prompted (`/mcp`). Claude can then call `document_parse` with an absolute PDF path.
+
+**Claude Desktop** — add the same server to your desktop config (macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`, Linux: `~/.config/Claude/claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "fineprint-document": {
+      "command": "npx",
+      "args": ["tsx", "packages/mcp-document/src/server.ts"],
+      "cwd": "/absolute/path/to/FInePrint-Agent"
+    }
+  }
+}
+```
+
+Restart Claude after editing. Standalone smoke test: `npm run mcp:document` (needs a prior `npm run build` for the workspace start script).
+
 ### NRP / Anthropic (live model)
 
 ```

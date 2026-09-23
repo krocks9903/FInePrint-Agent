@@ -11,7 +11,7 @@ Uploaded contracts are **untrusted, PII-bearing data**. Pipeline: ingest → par
 | UI / API | Next.js App Router (`apps/web`) on Vercel |
 | Auth / DB / files | Supabase (migrations ready); **local JSON store default for M2 onboarding** |
 | Agent | `@fineprint/agent` + OpenAI-compatible client (`nrp` \| `anthropic` \| `mock`) |
-| Tooling | MCP `document_parse` in `@fineprint/mcp-document` |
+| Tooling | MCP `document_parse` in `@fineprint/mcp-document` (Claude Code/Desktop can host via `.mcp.json`) |
 | Contracts | `@fineprint/shared` |
 
 ## System context
