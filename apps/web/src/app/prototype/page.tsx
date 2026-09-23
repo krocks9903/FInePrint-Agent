@@ -3,53 +3,17 @@
 import {
   ChangeEvent,
   DragEvent,
+  useCallback,
   useRef,
   useState,
 } from "react";
 
+import type {
+  FindingRecord,
+  ScanDetail,
+} from "@fineprint/shared";
+
 import styles from "./prototype.module.css";
-
-type Risk = {
-  id: number;
-  severity: "High" | "Medium" | "Low";
-  title: string;
-  explanation: string;
-  quote: string;
-  location: string;
-};
-
-const demoRisks: Risk[] = [
-  {
-    id: 1,
-    severity: "High",
-    title: "Early termination fee",
-    explanation:
-      "Ending this agreement before the lease expires may require an additional payment.",
-    quote:
-      "Resident shall pay an early termination fee equal to two months' rent...",
-    location: "Page 8 · Section 12.4",
-  },
-  {
-    id: 2,
-    severity: "High",
-    title: "Automatic renewal",
-    explanation:
-      "The agreement may renew automatically unless written notice is submitted before the deadline.",
-    quote:
-      "Tenant must provide written notice at least sixty (60) days prior to expiration...",
-    location: "Page 11 · Section 18.2",
-  },
-  {
-    id: 3,
-    severity: "Medium",
-    title: "Non-refundable administrative fee",
-    explanation:
-      "This charge will not be returned even if you complete the agreement without damages.",
-    quote:
-      "The $300 administrative fee is non-refundable under all circumstances.",
-    location: "Page 3 · Section 4.1",
-  },
-];
 
 export default function PrototypePage() {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -57,18 +21,28 @@ export default function PrototypePage() {
   const [file, setFile] = useState<File | null>(null);
   const [dragging, setDragging] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
-  const [analyzed, setAnalyzed] = useState(false);
+
+  const [status, setStatus] = useState("");
+  const [error, setError] = useState("");
+  const [findings, setFindings] = useState<FindingRecord[]>([]);
+  const [scanMeta, setScanMeta] = useState("");
 
   function chooseFile(selected?: File) {
     if (!selected) return;
 
-    if (selected.type !== "application/pdf") {
-      alert("FinePrint currently accepts PDF documents.");
+    if (
+      selected.type !== "application/pdf" &&
+      !selected.name.toLowerCase().endsWith(".pdf")
+    ) {
+      setError("FinePrint currently accepts PDF documents.");
       return;
     }
 
+    setError("");
     setFile(selected);
-    setAnalyzed(false);
+    setFindings([]);
+    setStatus("");
+    setScanMeta("");
   }
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -82,28 +56,104 @@ export default function PrototypePage() {
     chooseFile(event.dataTransfer.files?.[0]);
   }
 
+  const pollScan = useCallback(async (scanId: string) => {
+    for (let i = 0; i < 60; i++) {
+      const response = await fetch(`/api/scans/${scanId}`);
+
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+
+        throw new Error(
+          body.error ?? `Poll failed (${response.status})`,
+        );
+      }
+
+      const detail = (await response.json()) as ScanDetail;
+
+      setStatus(detail.scan.status);
+
+      if (detail.scan.status === "done") {
+        setFindings(detail.findings);
+
+        setScanMeta(
+          `${detail.document.original_filename} · model ${detail.scan.model} · ${detail.findings.length} grounded finding(s)`,
+        );
+
+        return;
+      }
+
+      if (detail.scan.status === "failed") {
+        throw new Error(
+          detail.scan.error ?? "Scan failed",
+        );
+      }
+
+      await new Promise((resolve) =>
+        setTimeout(resolve, 400),
+      );
+    }
+
+    throw new Error("Timed out waiting for scan");
+  }, []);
+
   async function analyzeDocument() {
     if (!file) return;
 
+    setError("");
+    setFindings([]);
+    setScanMeta("");
     setAnalyzing(true);
-    setAnalyzed(false);
+    setStatus("uploading");
 
-    // Prototype only for now.
-    // We will replace this with the team's real API request.
-    await new Promise((resolve) => setTimeout(resolve, 1400));
+    try {
+      const body = new FormData();
+      body.append("file", file);
 
-    setAnalyzing(false);
-    setAnalyzed(true);
+      const response = await fetch("/api/scans", {
+        method: "POST",
+        body,
+      });
+
+      const json = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          json.error ?? "Upload failed",
+        );
+      }
+
+      setStatus(
+        json.cache_hit
+          ? "done (cache)"
+          : json.status,
+      );
+
+      await pollScan(json.scan_id);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : String(err),
+      );
+    } finally {
+      setAnalyzing(false);
+    }
   }
 
   function reset() {
     setFile(null);
-    setAnalyzed(false);
+    setFindings([]);
+    setStatus("");
+    setError("");
+    setScanMeta("");
 
     if (inputRef.current) {
       inputRef.current.value = "";
     }
   }
+
+  const analysisComplete =
+    status === "done" && !analyzing;
 
   return (
     <main className={styles.page}>
@@ -112,14 +162,19 @@ export default function PrototypePage() {
           <div className={styles.logo}>F</div>
 
           <div>
-            <span className={styles.brandName}>FinePrint</span>
+            <span className={styles.brandName}>
+              FinePrint
+            </span>
+
             <span className={styles.brandSubtitle}>
               Document Risk Scanner
             </span>
           </div>
         </div>
 
-        <span className={styles.prototypeBadge}>Prototype</span>
+        <span className={styles.prototypeBadge}>
+          Prototype
+        </span>
       </nav>
 
       <section className={styles.hero}>
@@ -133,14 +188,15 @@ export default function PrototypePage() {
         </h1>
 
         <p>
-          Upload a lease, contract, or agreement. FinePrint finds the
-          stipulations, deadlines, penalties, and fees that deserve your
-          attention.
+          Upload a lease, contract, or agreement.
+          FinePrint finds the stipulations,
+          deadlines, penalties, and fees that
+          deserve your attention.
         </p>
       </section>
 
       <section className={styles.content}>
-        {!analyzed ? (
+        {!analysisComplete ? (
           <div className={styles.uploadCard}>
             <div
               className={`${styles.dropZone} ${
@@ -150,29 +206,40 @@ export default function PrototypePage() {
                 event.preventDefault();
                 setDragging(true);
               }}
-              onDragLeave={() => setDragging(false)}
+              onDragLeave={() =>
+                setDragging(false)
+              }
               onDrop={handleDrop}
-              onClick={() => inputRef.current?.click()}
+              onClick={() =>
+                !analyzing &&
+                inputRef.current?.click()
+              }
             >
               <input
                 ref={inputRef}
                 type="file"
-                accept="application/pdf"
+                accept="application/pdf,.pdf"
                 onChange={handleFileChange}
                 className={styles.hiddenInput}
+                disabled={analyzing}
               />
 
-              <div className={styles.uploadIcon}>↑</div>
+              <div className={styles.uploadIcon}>
+                ↑
+              </div>
 
               {!file ? (
                 <>
                   <h2>Upload your document</h2>
 
                   <p>
-                    Drag and drop a PDF here, or click to browse.
+                    Drag and drop a PDF here, or
+                    click to browse.
                   </p>
 
-                  <span className={styles.fileHint}>
+                  <span
+                    className={styles.fileHint}
+                  >
                     PDF documents
                   </span>
                 </>
@@ -181,11 +248,17 @@ export default function PrototypePage() {
                   <h2>{file.name}</h2>
 
                   <p>
-                    {(file.size / 1024 / 1024).toFixed(2)} MB · Ready to
-                    analyze
+                    {(
+                      file.size /
+                      1024 /
+                      1024
+                    ).toFixed(2)}{" "}
+                    MB · Ready to analyze
                   </p>
 
-                  <span className={styles.fileHint}>
+                  <span
+                    className={styles.fileHint}
+                  >
                     Click to choose another file
                   </span>
                 </>
@@ -199,29 +272,53 @@ export default function PrototypePage() {
             >
               {analyzing ? (
                 <>
-                  <span className={styles.spinner} />
-                  Scanning document...
+                  <span
+                    className={styles.spinner}
+                  />
+
+                  {status === "uploading"
+                    ? "Uploading document..."
+                    : `Scanning document${
+                        status
+                          ? ` · ${status}`
+                          : "..."
+                      }`}
                 </>
               ) : (
                 "Analyze Fine Print"
               )}
             </button>
 
+            {error ? (
+              <div className={styles.errorBox}>
+                <strong>
+                  Something went wrong
+                </strong>
+                <p>{error}</p>
+              </div>
+            ) : null}
+
             <div className={styles.trustRow}>
-              <span>✓ Clause-level findings</span>
+              <span>
+                ✓ Clause-level findings
+              </span>
+
               <span>✓ Source citations</span>
+
               <span>✓ Ranked risks</span>
             </div>
 
             <p className={styles.disclaimer}>
-              FinePrint highlights language in your document. It does not
-              provide legal advice.
+              FinePrint highlights language in your
+              document. It does not provide legal
+              advice.
             </p>
           </div>
         ) : (
           <Results
             filename={file?.name ?? "Document.pdf"}
-            risks={demoRisks}
+            findings={findings}
+            scanMeta={scanMeta}
             onReset={reset}
           />
         )}
@@ -232,24 +329,40 @@ export default function PrototypePage() {
 
 function Results({
   filename,
-  risks,
+  findings,
+  scanMeta,
   onReset,
 }: {
   filename: string;
-  risks: Risk[];
+  findings: FindingRecord[];
+  scanMeta: string;
   onReset: () => void;
 }) {
+  const highPriority = findings.filter(
+    (finding) =>
+      finding.severity === "high" ||
+      finding.severity === "critical",
+  ).length;
+
   return (
     <div className={styles.results}>
       <div className={styles.resultsHeader}>
         <div>
-          <span className={styles.completeBadge}>
+          <span
+            className={styles.completeBadge}
+          >
             Analysis complete
           </span>
 
           <h2>Your FinePrint Report</h2>
 
           <p>{filename}</p>
+
+          {scanMeta ? (
+            <p className={styles.scanMeta}>
+              {scanMeta}
+            </p>
+          ) : null}
         </div>
 
         <button
@@ -262,88 +375,109 @@ function Results({
 
       <div className={styles.summary}>
         <div>
-          <strong>{risks.length}</strong>
+          <strong>{findings.length}</strong>
           <span>risks found</span>
         </div>
 
         <div>
-          <strong>
-            {
-              risks.filter(
-                (risk) => risk.severity === "High",
-              ).length
-            }
-          </strong>
+          <strong>{highPriority}</strong>
           <span>high priority</span>
         </div>
 
         <div>
-          <strong>{risks.length}</strong>
-          <span>clauses cited</span>
+          <strong>{findings.length}</strong>
+          <span>grounded citations</span>
         </div>
       </div>
 
       <div className={styles.sectionHeading}>
         <div>
           <span>Prioritized findings</span>
-          <h3>What deserves your attention</h3>
+
+          <h3>
+            What deserves your attention
+          </h3>
         </div>
 
         <p>Highest financial risk first</p>
       </div>
 
       <div className={styles.riskList}>
-        {risks.map((risk, index) => (
-          <article
-            className={styles.riskCard}
-            key={risk.id}
-          >
-            <div className={styles.rank}>
-              {index + 1}
-            </div>
+  {findings.length === 0 ? (
+    <div className={styles.reportNotice}>
+      <strong>No grounded money-loss risks found</strong>
+      <p>
+        FinePrint completed the scan, but no findings passed
+        citation validation. This does not guarantee that the
+        document contains no financial risk.
+      </p>
+    </div>
+  ) : (
+    findings.map((finding, index) => (
+      <article
+        className={styles.riskCard}
+        key={finding.id}
+      >
+        <div className={styles.rank}>
+          {index + 1}
+        </div>
 
-            <div className={styles.riskBody}>
-              <div className={styles.riskTop}>
-                <h4>{risk.title}</h4>
+        <div className={styles.riskBody}>
+          <div className={styles.riskTop}>
+            <h4>
+              {finding.risk_type
+                .replaceAll("_", " ")
+                .replace(/\b\w/g, (char) =>
+                  char.toUpperCase(),
+                )}
+            </h4>
 
-                <span
-                  className={`${styles.severity} ${
-                    risk.severity === "High"
-                      ? styles.high
-                      : risk.severity === "Medium"
-                        ? styles.medium
-                        : styles.low
-                  }`}
-                >
-                  {risk.severity} risk
-                </span>
-              </div>
+            <span
+              className={`${styles.severity} ${
+                finding.severity === "high" ||
+                finding.severity === "critical"
+                  ? styles.high
+                  : finding.severity === "medium"
+                    ? styles.medium
+                    : styles.low
+              }`}
+            >
+              {finding.severity} risk
+            </span>
+          </div>
 
-              <p className={styles.explanation}>
-                {risk.explanation}
-              </p>
+          <p className={styles.explanation}>
+            {finding.plain_english}
+          </p>
 
-              <div className={styles.quote}>
-                <span>Source clause</span>
+          <div className={styles.quote}>
+            <span>Grounded source clause</span>
 
-                <blockquote>
-                  “{risk.quote}”
-                </blockquote>
+            <blockquote>
+              “{finding.quote}”
+            </blockquote>
 
-                <strong>{risk.location}</strong>
-              </div>
-            </div>
-          </article>
-        ))}
-      </div>
+            <strong>
+              Page {finding.page}
+            </strong>
+          </div>
+        </div>
+      </article>
+    ))
+  )}
+</div>
 
       <div className={styles.reportNotice}>
-        <strong>Verify before acting</strong>
+        <strong>
+          Verify before acting
+        </strong>
 
         <p>
-          FinePrint is designed to surface potentially important clauses,
-          not replace professional legal review. Always verify each
-          finding against the original document.
+          FinePrint surfaces potentially
+          important clauses and validates each
+          quote against the uploaded document.
+          It does not replace professional legal
+          review.
         </p>
       </div>
     </div>
